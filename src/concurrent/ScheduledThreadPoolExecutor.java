@@ -47,7 +47,8 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Timer;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static concurrent.TimeUnit.NANOSECONDS;
+
 
 /**
  * A {@link ThreadPoolExecutor} that can additionally schedule
