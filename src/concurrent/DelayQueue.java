@@ -44,7 +44,8 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static concurrent.TimeUnit.NANOSECONDS;
+
 
 /**
  * An unbounded {@linkplain BlockingQueue blocking queue} of
