@@ -268,29 +268,39 @@ public class StampedLock implements java.io.Serializable {
     private static final int NCPU = Runtime.getRuntime().availableProcessors();
 
     /** Maximum number of retries before enqueuing on acquisition */
+    // 自旋次数 64
     private static final int SPINS = (NCPU > 1) ? 1 << 6 : 0;
 
     /** Maximum number of retries before blocking at head on acquisition */
+    // 头部自旋次数 1024
     private static final int HEAD_SPINS = (NCPU > 1) ? 1 << 10 : 0;
 
     /** Maximum number of retries before re-blocking */
+    // 头部最大重试次数65536
     private static final int MAX_HEAD_SPINS = (NCPU > 1) ? 1 << 16 : 0;
 
     /** The period for yielding when waiting for overflow spinlock */
     private static final int OVERFLOW_YIELD_RATE = 7; // must be power 2 - 1
 
     /** The number of bits to use for reader count before overflowing */
+    // 最大读127
     private static final int LG_READERS = 7;
 
     // Values for lock state and stamp operations
+    // 读锁单位值
     private static final long RUNIT = 1L;
+    // 写mask位
     private static final long WBIT  = 1L << LG_READERS;
+    // 读的bit位十进制值
     private static final long RBITS = WBIT - 1L;
+    // 读最大值 126
     private static final long RFULL = RBITS - 1L;
+    // 读写所有bit位值
     private static final long ABITS = RBITS | WBIT;
     private static final long SBITS = ~RBITS; // note overlap with ABITS
 
     // Initial value for lock state; avoid failure value zero
+    // state 0 表示失败
     private static final long ORIGIN = WBIT << 1;
 
     // Special value from cancelled acquire methods so caller can throw IE
@@ -345,6 +355,7 @@ public class StampedLock implements java.io.Serializable {
      */
     public long writeLock() {
         long s, next;  // bypass acquireWrite in fully unlocked case only
+        // 存在写锁和读锁返回0， 如果cas写锁成功，返回新的state值，否则自旋获取写锁
         return ((((s = state) & ABITS) == 0L &&
                  U.compareAndSwapLong(this, STATE, s, next = s + WBIT)) ?
                 next : acquireWrite(false, 0L));
@@ -419,6 +430,7 @@ public class StampedLock implements java.io.Serializable {
      */
     public long readLock() {
         long s = state, next;  // bypass acquireRead on common uncontended case
+        // 没有队列且读锁未饱和且cas成功，返回新的state值，否则自旋获取读锁
         return ((whead == wtail && (s & ABITS) < RFULL &&
                  U.compareAndSwapLong(this, STATE, s, next = s + RUNIT)) ?
                 next : acquireRead(false, 0L));
@@ -506,6 +518,7 @@ public class StampedLock implements java.io.Serializable {
      */
     public long tryOptimisticRead() {
         long s;
+        // 没有写锁，则取读锁位置0后的state值
         return (((s = state) & WBIT) == 0L) ? (s & SBITS) : 0L;
     }
 
@@ -538,6 +551,7 @@ public class StampedLock implements java.io.Serializable {
         WNode h;
         if (state != stamp || (stamp & WBIT) == 0L)
             throw new IllegalMonitorStateException();
+        // 释放锁会加版本，state = stamp + WBIT，避免ABA问题，溢出了会使用origin，避免使用0
         state = (stamp += WBIT) == 0L ? ORIGIN : stamp;
         if ((h = whead) != null && h.status != 0)
             release(h);
@@ -554,6 +568,7 @@ public class StampedLock implements java.io.Serializable {
     public void unlockRead(long stamp) {
         long s, m; WNode h;
         for (;;) {
+            // stamp/state与SBITS相与是为了看读锁位之外的bit位是不是一致的，不一致则表示无效 或stamp中读锁位=0 或 （state中读锁位为0或有写锁）
             if (((s = state) & SBITS) != (stamp & SBITS) ||
                 (stamp & ABITS) == 0L || (m = s & ABITS) == 0L || m == WBIT)
                 throw new IllegalMonitorStateException();
@@ -579,10 +594,13 @@ public class StampedLock implements java.io.Serializable {
      */
     public void unlock(long stamp) {
         long a = stamp & ABITS, m, s; WNode h;
+        // 读锁位以外的bit位一致
         while (((s = state) & SBITS) == (stamp & SBITS)) {
+            // 读锁位为0，break
             if ((m = s & ABITS) == 0L)
                 break;
             else if (m == WBIT) {
+                // m为写锁，如果a不是，break
                 if (a != m)
                     break;
                 state = (s += WBIT) == 0L ? ORIGIN : s;
@@ -590,7 +608,7 @@ public class StampedLock implements java.io.Serializable {
                     release(h);
                 return;
             }
-            else if (a == 0L || a >= WBIT)
+            else if (a == 0L || a >= WBIT) //stamp invalid
                 break;
             else if (m < RFULL) {
                 if (U.compareAndSwapLong(this, STATE, s, s - RUNIT)) {
@@ -619,19 +637,25 @@ public class StampedLock implements java.io.Serializable {
      */
     public long tryConvertToWriteLock(long stamp) {
         long a = stamp & ABITS, m, s, next;
+        // stamp/state与SBITS相与是为了看读锁位之外的bit位是不是一致的，不一致则表示无效
         while (((s = state) & SBITS) == (stamp & SBITS)) {
+            // 读写锁位0
             if ((m = s & ABITS) == 0L) {
+                // 如果a不是0，break
                 if (a != 0L)
                     break;
+                // cas获取写锁
                 if (U.compareAndSwapLong(this, STATE, s, next = s + WBIT))
                     return next;
             }
             else if (m == WBIT) {
+                // m为写锁，如果a不是，break，表明有其他线程持有写锁
                 if (a != m)
                     break;
+                // 否则就是当前线程持有，直接返回
                 return stamp;
             }
-            else if (m == RUNIT && a != 0L) {
+            else if (m == RUNIT && a != 0L) { //只有一个读锁，cas转成写锁，如果读锁不是当前线程持有的话，会存在问题的
                 if (U.compareAndSwapLong(this, STATE, s,
                                          next = s - RUNIT + WBIT))
                     return next;
@@ -655,11 +679,14 @@ public class StampedLock implements java.io.Serializable {
      */
     public long tryConvertToReadLock(long stamp) {
         long a = stamp & ABITS, m, s, next; WNode h;
+        // stamp/state与SBITS相与是为了看读锁位之外的bit位是不是一致的，不一致则表示无效
         while (((s = state) & SBITS) == (stamp & SBITS)) {
+            // 读写锁位0
             if ((m = s & ABITS) == 0L) {
+                // 如果a不是0，invalid，break
                 if (a != 0L)
                     break;
-                else if (m < RFULL) {
+                else if (m < RFULL) { //cas获取读锁
                     if (U.compareAndSwapLong(this, STATE, s, next = s + RUNIT))
                         return next;
                 }
@@ -667,8 +694,10 @@ public class StampedLock implements java.io.Serializable {
                     return next;
             }
             else if (m == WBIT) {
+                // m为写锁，如果a不是，break，表明有其他线程持有写锁
                 if (a != m)
                     break;
+                //增加写锁版本及读锁+1
                 state = next = s + (WBIT + RUNIT);
                 if ((h = whead) != null && h.status != 0)
                     release(h);
@@ -694,11 +723,15 @@ public class StampedLock implements java.io.Serializable {
      */
     public long tryConvertToOptimisticRead(long stamp) {
         long a = stamp & ABITS, m, s, next; WNode h;
+        // 限制指令重排啥的
         U.loadFence();
         for (;;) {
+            // stamp/state与SBITS相与是为了看读锁位之外的bit位是不是一致的，不一致则表示无效
             if (((s = state) & SBITS) != (stamp & SBITS))
                 break;
+            // 读写锁位0
             if ((m = s & ABITS) == 0L) {
+                // 如果a不是0，break
                 if (a != 0L)
                     break;
                 return s;
@@ -736,6 +769,7 @@ public class StampedLock implements java.io.Serializable {
     public boolean tryUnlockWrite() {
         long s; WNode h;
         if (((s = state) & WBIT) != 0L) {
+            // 释放锁会加版本，state = stamp + WBIT，避免ABA问题，溢出了会使用origin，避免使用0
             state = (s += WBIT) == 0L ? ORIGIN : s;
             if ((h = whead) != null && h.status != 0)
                 release(h);
@@ -959,8 +993,9 @@ public class StampedLock implements java.io.Serializable {
      */
     private long tryIncReaderOverflow(long s) {
         // assert (s & ABITS) >= RFULL;
+        // 126个读锁满了之后(s=101111110)，overflow ++;
         if ((s & ABITS) == RFULL) {
-            if (U.compareAndSwapLong(this, STATE, s, s | RBITS)) {
+            if (U.compareAndSwapLong(this, STATE, s, s | RBITS)) { // state:101111111
                 ++readerOverflow;
                 state = s;
                 return s;
@@ -968,6 +1003,7 @@ public class StampedLock implements java.io.Serializable {
         }
         else if ((LockSupport.nextSecondarySeed() &
                   OVERFLOW_YIELD_RATE) == 0)
+            // 让出线程
             Thread.yield();
         return 0L;
     }
@@ -1033,17 +1069,22 @@ public class StampedLock implements java.io.Serializable {
         WNode node = null, p;
         for (int spins = -1;;) { // spin while enqueuing
             long m, s, ns;
+            // cas获取锁，返回新的state
             if ((m = (s = state) & ABITS) == 0L) {
                 if (U.compareAndSwapLong(this, STATE, s, ns = s + WBIT))
                     return ns;
             }
             else if (spins < 0)
+                // 如果写锁被占用且写队列头尾相同（没有线程竞争），入队列前自旋64次，否则直接入队列
                 spins = (m == WBIT && wtail == whead) ? SPINS : 0;
             else if (spins > 0) {
+                // 获取锁失败，自旋递减
                 if (LockSupport.nextSecondarySeed() >= 0)
                     --spins;
             }
+            // 自旋完仍然没有获取到锁，开始入队列
             else if ((p = wtail) == null) { // initialize queue
+                // 队列初始化，头尾相同节点
                 WNode hd = new WNode(WMODE, null);
                 if (U.compareAndSwapObject(this, WHEAD, null, hd))
                     wtail = hd;
@@ -1053,6 +1094,7 @@ public class StampedLock implements java.io.Serializable {
             else if (node.prev != p)
                 node.prev = p;
             else if (U.compareAndSwapObject(this, WTAIL, p, node)) {
+                // cas入队尾成功
                 p.next = node;
                 break;
             }
@@ -1060,12 +1102,15 @@ public class StampedLock implements java.io.Serializable {
 
         for (int spins = -1;;) {
             WNode h, np, pp; int ps;
+            // 如果node处于头部节点，那么spin获取锁
             if ((h = whead) == p) {
                 if (spins < 0)
                     spins = HEAD_SPINS;
                 else if (spins < MAX_HEAD_SPINS)
+                    // 自旋次数翻倍，直到最大值
                     spins <<= 1;
                 for (int k = spins;;) { // spin at head
+                    // 自旋获取写锁，
                     long s, ns;
                     if (((s = state) & ABITS) == 0L) {
                         if (U.compareAndSwapLong(this, STATE, s,
@@ -1082,6 +1127,7 @@ public class StampedLock implements java.io.Serializable {
             }
             else if (h != null) { // help release stale waiters
                 WNode c; Thread w;
+                // 如果是头节点是读节点，unpark它的linked reader node
                 while ((c = h.cowait) != null) {
                     if (U.compareAndSwapObject(h, WCOWAIT, c, c.cowait) &&
                         (w = c.thread) != null)
@@ -1089,13 +1135,17 @@ public class StampedLock implements java.io.Serializable {
                 }
             }
             if (whead == h) {
+                // 当前节点的前置节点发生变化时，更新p节点
                 if ((np = node.prev) != p) {
                     if (np != null)
                         (p = np).next = node;   // stale
                 }
                 else if ((ps = p.status) == 0)
+                    // 获取不到锁，将前置节点的状态改为waiting,当前节点park时是由前置节点唤醒的
+                    //第一次获取锁失败后将状态改为waiting，第二次循环还获取不到就将当前node park
                     U.compareAndSwapInt(p, WSTATUS, 0, WAITING);
                 else if (ps == CANCELLED) {
+                    // 前置节点是取消状态时，要往前找节点
                     if ((pp = p.prev) != null) {
                         node.prev = pp;
                         pp.next = node;
@@ -1106,7 +1156,9 @@ public class StampedLock implements java.io.Serializable {
                     if (deadline == 0L)
                         time = 0L;
                     else if ((time = deadline - System.nanoTime()) <= 0L)
+                        // 超时取消
                         return cancelWaiter(node, node, false);
+                    // park当前node
                     Thread wt = Thread.currentThread();
                     U.putObject(wt, PARKBLOCKER, this);
                     node.thread = wt;
@@ -1135,13 +1187,16 @@ public class StampedLock implements java.io.Serializable {
         WNode node = null, p;
         for (int spins = -1;;) {
             WNode h;
+            // 不存在竞争
             if ((h = whead) == (p = wtail)) {
                 for (long m, s, ns;;) {
+                    // 只有读锁且未饱和，则cas+1，否则，如果没有写锁，那么尝试放到溢出读锁中
                     if ((m = (s = state) & ABITS) < RFULL ?
                         U.compareAndSwapLong(this, STATE, s, ns = s + RUNIT) :
                         (m < WBIT && (ns = tryIncReaderOverflow(s)) != 0L))
                         return ns;
                     else if (m >= WBIT) {
+                        // 如果有写锁，又不存在竞争，则开始spin
                         if (spins > 0) {
                             if (LockSupport.nextSecondarySeed() >= 0)
                                 --spins;
@@ -1149,6 +1204,7 @@ public class StampedLock implements java.io.Serializable {
                         else {
                             if (spins == 0) {
                                 WNode nh = whead, np = wtail;
+                                // 一轮spin结束后，如果头尾节点还是没变/头尾节点变化了，但是头尾已经不再是同一个节点了，跳出循环去排队
                                 if ((nh == h && np == p) || (h = nh) != (p = np))
                                     break;
                             }
@@ -1157,33 +1213,40 @@ public class StampedLock implements java.io.Serializable {
                     }
                 }
             }
+            // 头尾节点不等，则尝试入队相关操作
             if (p == null) { // initialize queue
                 WNode hd = new WNode(WMODE, null);
                 if (U.compareAndSwapObject(this, WHEAD, null, hd))
                     wtail = hd;
             }
             else if (node == null)
+                // 创建一个读节点
                 node = new WNode(RMODE, p);
-            else if (h == p || p.mode != RMODE) {
+            else if (h == p || p.mode != RMODE) { // 如果pre节点是头节点/p节点是写节点
+                // 将node挂在尾节点
                 if (node.prev != p)
                     node.prev = p;
+                // 入队列成功后，跳出当前循环。
                 else if (U.compareAndSwapObject(this, WTAIL, p, node)) {
                     p.next = node;
                     break;
                 }
             }
             else if (!U.compareAndSwapObject(p, WCOWAIT,
-                                             node.cowait = p.cowait, node))
+                                             node.cowait = p.cowait, node)) //如果前节点是读节点，要挂在co-waiter上（头插法）
                 node.cowait = null;
-            else {
+            else { // 挂在co-waiter上成功后
                 for (;;) {
                     WNode pp, c; Thread w;
+                    // 帮忙唤醒co-waiter
                     if ((h = whead) != null && (c = h.cowait) != null &&
                         U.compareAndSwapObject(h, WCOWAIT, c, c.cowait) &&
                         (w = c.thread) != null) // help release
                         U.unpark(w);
+                    // 前面只有一个节点或者只有当前节点在排队
                     if (h == (pp = p.prev) || h == p || pp == null) {
                         long m, s, ns;
+                        // 如果没有读锁，则一直尝试获取读锁
                         do {
                             if ((m = (s = state) & ABITS) < RFULL ?
                                 U.compareAndSwapLong(this, STATE, s,
@@ -1193,24 +1256,31 @@ public class StampedLock implements java.io.Serializable {
                                 return ns;
                         } while (m < WBIT);
                     }
+                    // 头节点和p的前节点不变的情况下，执行if里面的逻辑
                     if (whead == h && p.prev == pp) {
                         long time;
+                        //  如果pp == null || h == p，说明前面的节点已经处理完了或取消了，则不需要阻塞跳出当前循环，执行第一层循环逻辑
+                        // todo 直接将node置成null就好了嘛，前面将节点放到了p的co-waiter上了，没有挂上线程，看起来不会有啥问题
                         if (pp == null || h == p || p.status > 0) {
                             node = null; // throw away
                             break;
                         }
                         if (deadline == 0L)
                             time = 0L;
+                        // 超时取消
                         else if ((time = deadline - System.nanoTime()) <= 0L)
                             return cancelWaiter(node, p, false);
+
                         Thread wt = Thread.currentThread();
                         U.putObject(wt, PARKBLOCKER, this);
                         node.thread = wt;
+                        // park thread p的前节点不是头节点，或者写锁存且h还是whead节点&&pp还是p的前节点
                         if ((h != pp || (state & ABITS) == WBIT) &&
                             whead == h && p.prev == pp)
                             U.park(false, time);
                         node.thread = null;
                         U.putObject(wt, PARKBLOCKER, null);
+                        // 中断取消
                         if (interruptible && Thread.interrupted())
                             return cancelWaiter(node, p, true);
                     }
@@ -1220,6 +1290,7 @@ public class StampedLock implements java.io.Serializable {
 
         for (int spins = -1;;) {
             WNode h, np, pp; int ps;
+            // 处于头节点时，head spin获取锁
             if ((h = whead) == p) {
                 if (spins < 0)
                     spins = HEAD_SPINS;
@@ -1246,7 +1317,7 @@ public class StampedLock implements java.io.Serializable {
                         break;
                 }
             }
-            else if (h != null) {
+            else if (h != null) { // help unpark threads
                 WNode c; Thread w;
                 while ((c = h.cowait) != null) {
                     if (U.compareAndSwapObject(h, WCOWAIT, c, c.cowait) &&
@@ -1255,19 +1326,23 @@ public class StampedLock implements java.io.Serializable {
                 }
             }
             if (whead == h) {
+                // 将p节点更新为node.prev
                 if ((np = node.prev) != p) {
                     if (np != null)
                         (p = np).next = node;   // stale
                 }
                 else if ((ps = p.status) == 0)
+                    // 更新waiting
                     U.compareAndSwapInt(p, WSTATUS, 0, WAITING);
                 else if (ps == CANCELLED) {
+                    // p节点取消后往前找节点
                     if ((pp = p.prev) != null) {
                         node.prev = pp;
                         pp.next = node;
                     }
                 }
                 else {
+                    // park thread
                     long time;
                     if (deadline == 0L)
                         time = 0L;
@@ -1320,6 +1395,7 @@ public class StampedLock implements java.io.Serializable {
             }
             if (group == node) {
                 for (WNode r = group.cowait; r != null; r = r.cowait) {
+                    // 唤醒co-waiter
                     if ((w = r.thread) != null)
                         U.unpark(w);       // wake up uncancelled co-waiters
                 }
@@ -1328,23 +1404,29 @@ public class StampedLock implements java.io.Serializable {
                     while ((succ = node.next) == null ||
                            succ.status == CANCELLED) {
                         WNode q = null;    // find successor the slow way
+                        // 找到node的下一个有效节点
                         for (WNode t = wtail; t != null && t != node; t = t.prev)
                             if (t.status != CANCELLED)
                                 q = t;     // don't link if succ cancelled
+                        // succ == q是说succ == null
                         if (succ == q ||   // ensure accurate successor
                             U.compareAndSwapObject(node, WNEXT,
-                                                   succ, succ = q)) {
+                                                   succ, succ = q) // 通过cas，将node的下一个节点设置成有效的节点
+                        ) {
+                            // 如果是node是尾节点，那么将wtail指向pred
                             if (succ == null && node == wtail)
                                 U.compareAndSwapObject(this, WTAIL, node, pred);
                             break;
                         }
                     }
+                    // 将pred节点的next指向succ
                     if (pred.next == node) // unsplice pred link
                         U.compareAndSwapObject(pred, WNEXT, node, succ);
                     if (succ != null && (w = succ.thread) != null) {
                         succ.thread = null;
                         U.unpark(w);       // wake up succ to observe new pred
                     }
+                    // pre节点是有效的就break，否则继续往前挂接
                     if (pred.status != CANCELLED || (pp = pred.prev) == null)
                         break;
                     node.prev = pp;        // repeat if new pred wrong/cancelled
@@ -1357,11 +1439,13 @@ public class StampedLock implements java.io.Serializable {
         while ((h = whead) != null) {
             long s; WNode q; // similar to release() but check eligibility
             if ((q = h.next) == null || q.status == CANCELLED) {
+                // 从尾往前，找到离whead最近的有效节点
                 for (WNode t = wtail; t != null && t != h; t = t.prev)
                     if (t.status <= 0)
                         q = t;
             }
             if (h == whead) {
+                // 没有写锁且是读节点，需要release(h)来竞争锁
                 if (q != null && h.status == 0 &&
                     ((s = state) & ABITS) != WBIT && // waiter is eligible
                     (s == 0L || q.mode == RMODE))

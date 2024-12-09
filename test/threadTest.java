@@ -1,7 +1,6 @@
 import concurrent.TimeUnit;
 
 import concurrent.locks.ReentrantReadWriteLock;
-import org.junit.Test;
 
 /**
  * @author eric
