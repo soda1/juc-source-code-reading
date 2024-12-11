@@ -864,6 +864,8 @@ public abstract class AbstractQueuedSynchronizer
             boolean interrupted = false;
             for (;;) {
                 final Node p = node.predecessor();
+                // 入队列后，只能按FIFO的方式获取锁，像reentrantLock那种实现非公平锁的时候，
+                // 只有初次尝试获取的时候才能以非公平的方式获取锁，否则入队列后只能按FIFO的方式获取
                 if (p == head && tryAcquire(arg)) {
                     setHead(node);
                     p.next = null; // help GC
@@ -1686,6 +1688,7 @@ public abstract class AbstractQueuedSynchronizer
          */
         Node p = enq(node);
         int ws = p.waitStatus;
+        // 如果前面节点取消了，那么就upark node，让node找predecessor
         if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
             LockSupport.unpark(node.thread);
         return true;
@@ -1876,7 +1879,7 @@ public abstract class AbstractQueuedSynchronizer
                 if ( (firstWaiter = first.nextWaiter) == null)
                     lastWaiter = null;
                 first.nextWaiter = null;
-            } while (!transferForSignal(first) &&
+            } while (!transferForSignal(first) && //唤醒第一个等待线程，如果失败就顺延
                      (first = firstWaiter) != null);
         }
 
@@ -1939,6 +1942,7 @@ public abstract class AbstractQueuedSynchronizer
          *         returns {@code false}
          */
         public final void signal() {
+            // 只有持有锁的线程才能唤醒
             if (!isHeldExclusively())
                 throw new IllegalMonitorStateException();
             Node first = firstWaiter;
@@ -2036,14 +2040,19 @@ public abstract class AbstractQueuedSynchronizer
         public final void await() throws InterruptedException {
             if (Thread.interrupted())
                 throw new InterruptedException();
+            // 加入等待队列
             Node node = addConditionWaiter();
+            // 释放当前线程持有的写锁，如果线程没有持有写锁，则抛出异常
             int savedState = fullyRelease(node);
+
             int interruptMode = 0;
+            // 判断节点是否已经进入锁等待队列了，不是的话就park
             while (!isOnSyncQueue(node)) {
                 LockSupport.park(this);
                 if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
                     break;
             }
+            // 重新获取写锁
             if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
                 interruptMode = REINTERRUPT;
             if (node.nextWaiter != null) // clean up if cancelled
