@@ -399,6 +399,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
         final long deadline = timed ? System.nanoTime() + nanos : 0L;
         WaitNode q = null;
         boolean queued = false;
+        // 加入waiters，然后park，等待run方法完成后，唤醒所有等待的线程。
         for (;;) {
             if (Thread.interrupted()) {
                 removeWaiter(q);
