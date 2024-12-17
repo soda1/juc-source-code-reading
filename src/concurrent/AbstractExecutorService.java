@@ -173,8 +173,9 @@ public abstract class AbstractExecutorService implements ExecutorService {
             int active = 1;
 
             for (;;) {
+                // 从完成队列中取出一个任务
                 Future<T> f = ecs.poll();
-                if (f == null) {
+                if (f == null) { // 如果为空就继续submit任务
                     if (ntasks > 0) {
                         --ntasks;
                         futures.add(ecs.submit(it.next()));
