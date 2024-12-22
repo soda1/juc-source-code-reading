@@ -384,10 +384,16 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * below).
      */
     private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
-    private static final int COUNT_BITS = Integer.SIZE - 3;
+
+    private static final int COUNT_BITS = Integer.SIZE - 3; // 29 bits
     private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
 
     // runState is stored in the high-order bits
+    // RUNNING:    11100000000000000000000000000000
+    // SHUTDOWN:    0000000000000000000000000000000
+    // STOP:        0100000000000000000000000000000
+    // TIDYING:     1000000000000000000000000000000
+    // TERMINATED:  1100000000000000000000000000000
     private static final int RUNNING    = -1 << COUNT_BITS;
     private static final int SHUTDOWN   =  0 << COUNT_BITS;
     private static final int STOP       =  1 << COUNT_BITS;
@@ -1368,11 +1374,13 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * and so reject the task.
          */
         int c = ctl.get();
+        // 起核心线程
         if (workerCountOf(c) < corePoolSize) {
             if (addWorker(command, true))
                 return;
             c = ctl.get();
         }
+        // 起最大线程
         if (isRunning(c) && workQueue.offer(command)) {
             int recheck = ctl.get();
             if (! isRunning(recheck) && remove(command))
