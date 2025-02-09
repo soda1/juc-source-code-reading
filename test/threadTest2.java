@@ -1,7 +1,11 @@
-import concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.StampedLock;
 
 /**
@@ -89,6 +93,55 @@ public class threadTest2 {
             // stampedLock.unlockRead(l1);
         }).start();
         while (true) {
+        }
+    }
+
+    @Test
+    @DisplayName("测试线程池")
+    public void testThreadPool() throws InterruptedException {
+        int COUNT_BITS = Integer.SIZE - 3;
+        int CAPACITY = (1 << COUNT_BITS) - 1;
+        int RUNNING    = -1 << COUNT_BITS;
+        int SHUTDOWN   =  0 << COUNT_BITS;
+        int STOP       =  1 << COUNT_BITS;
+        int TIDYING    =  2 << COUNT_BITS;
+        int TERMINATED =  3 << COUNT_BITS;
+
+        System.out.println(Integer.toBinaryString(RUNNING));
+        System.out.println(Integer.toBinaryString(SHUTDOWN));
+        System.out.println(Integer.toBinaryString(STOP));
+        System.out.println(Integer.toBinaryString(TIDYING));
+        System.out.println(Integer.toBinaryString(TERMINATED));
+    }
+
+    @Test
+    @DisplayName("测试forkJoin")
+    public void testForkJoin() {
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
+        forkJoinPool.invoke(ForkJoinTask.adapt(() -> {
+            System.out.println("hello");
+        }));
+        while (true) {
+            System.out.println(forkJoinPool.getQueuedTaskCount());
+        }
+    }
+
+    @Test
+    @DisplayName("测试forkJoin Scan")
+    public void testForkJoinScan() {
+        ForkJoinPool forkJoinPool = new ForkJoinPool(1);
+        for (int i = 0; i < 10000; i++) {
+            forkJoinPool.execute(ForkJoinTask.adapt(() -> {
+                System.out.println("hello");
+            }));
+        }
+        new Thread(() -> {
+            forkJoinPool.execute(ForkJoinTask.adapt(() -> {
+                System.out.println("hello2");
+            }));
+        }).start();
+        while (true) {
+            System.out.println(forkJoinPool.getQueuedTaskCount());
         }
     }
 }
