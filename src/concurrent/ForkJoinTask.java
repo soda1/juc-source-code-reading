@@ -243,9 +243,13 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
     /** The run status of this task */
     volatile int status; // accessed directly by pool and workers
     static final int DONE_MASK   = 0xf0000000;  // mask out non-completion bits
+    // 二进制是1111 0000 0000 0000 0000 0000 0000 0000
     static final int NORMAL      = 0xf0000000;  // must be negative
+    // 二进制是1100 0000 0000 0000 0000 0000 0000
     static final int CANCELLED   = 0xc0000000;  // must be < NORMAL
+    // 二进制是1000 0000 0000 0000 0000 0000 0000
     static final int EXCEPTIONAL = 0x80000000;  // must be < CANCELLED
+    // 二进制是0000 0000 0000 0001 0000 0000 0000 0000
     static final int SIGNAL      = 0x00010000;  // must be >= 1 << 16
     static final int SMASK       = 0x0000ffff;  // short bits for tags
 
@@ -258,9 +262,11 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      */
     private int setCompletion(int completion) {
         for (int s;;) {
+            // 小于0表示任务已经完成
             if ((s = status) < 0)
                 return s;
             if (U.compareAndSwapInt(this, STATUS, s, s | completion)) {
+                // 任务完成后唤醒等待线程
                 if ((s >>> 16) != 0)
                     synchronized (this) { notifyAll(); }
                 return completion;
@@ -376,12 +382,12 @@ public abstract class ForkJoinTask<V> implements Future<V>, Serializable {
      */
     private int doJoin() {
         int s; Thread t; ForkJoinWorkerThread wt; ForkJoinPool.WorkQueue w;
-        return (s = status) < 0 ? s :
+        return (s = status) < 0 ? s : //任务已完成，直接返回
             ((t = Thread.currentThread()) instanceof ForkJoinWorkerThread) ?
             (w = (wt = (ForkJoinWorkerThread)t).workQueue).
-            tryUnpush(this) && (s = doExec()) < 0 ? s :
-            wt.pool.awaitJoin(w, this, 0L) :
-            externalAwaitDone();
+            tryUnpush(this) && (s = doExec()) < 0 ? s : // 如果是worker线程调用且任务处于top，直接执行
+            wt.pool.awaitJoin(w, this, 0L) : // 否则等待，直到任务完成
+            externalAwaitDone(); // 不是worker线程调用join就外部等待执行
     }
 
     /**
