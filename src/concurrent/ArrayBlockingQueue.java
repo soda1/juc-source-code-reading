@@ -743,7 +743,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
                     if (itrs != null) {
                         if (count == 0)
                             itrs.queueIsEmpty();
-                        else if (i > take)
+                        else if (i > take) //说明takeIndex回到了index0，继续循环
                             itrs.takeIndexWrapped();
                     }
                     for (; i > 0 && lock.hasWaiters(notFull); i--)
@@ -840,7 +840,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
         private Node head;
 
         /** Used to expunge stale iterators */
-        private Node sweeper = null;
+        private Node sweeper = null; //最后一个检查过的节点
 
         private static final int SHORT_SWEEP_PROBES = 4;
         private static final int LONG_SWEEP_PROBES = 16;
@@ -865,7 +865,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
             final Node sweeper = this.sweeper;
             boolean passedGo;   // to limit search to one full sweep
 
-            if (sweeper == null) {
+            if (sweeper == null) { // 没检查过，从头开始
                 o = null;
                 p = head;
                 passedGo = true;
@@ -876,7 +876,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
             }
 
             for (; probes > 0; probes--) {
-                if (p == null) {
+                if (p == null) { //到头了，可能节点已经unlink了，重新开始检查
                     if (passedGo)
                         break;
                     o = null;
@@ -915,6 +915,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
          */
         void register(Itr itr) {
             // assert lock.getHoldCount() == 1;
+            // 头插法
             head = new Node(itr, head);
         }
 
@@ -1322,7 +1323,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
             final int prevTakeIndex = this.prevTakeIndex;
             final int len = items.length;
             int cycleDiff = cycles - prevCycles;
-            if (removedIndex < takeIndex)
+            if (removedIndex < takeIndex) // wrap-around to 0
                 cycleDiff++;
             final int removedDistance =
                 (cycleDiff * len) + (removedIndex - prevTakeIndex);
@@ -1337,7 +1338,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
                 else if (x > removedDistance) {
                     // assert cursor != prevTakeIndex;
                     this.cursor = cursor = dec(cursor);
-                }
+                } // x < removedDistance do nothing
             }
             int lastRet = this.lastRet;
             if (lastRet >= 0) {
